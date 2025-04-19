@@ -21,8 +21,28 @@ public class ECMADMain implements PlugInFilter {
             IJ.showStatus("ECMAD: Starting deconvolution...");
             IJ.log("ECMAD: Preparing data...");
 
-            // Convert image to float array
-            float[][] inputImage = ImageUtils.toFloatArray(ip);
+            boolean isColor = (ip instanceof ColorProcessor);
+            ImageProcessor[] channels = new ImageProcessor[isColor ? 3 : 1];
+
+            if (isColor) {
+                // For color images, manually extract RGB channels
+                ColorProcessor cp = (ColorProcessor) ip.duplicate();
+                byte[] R = new byte[cp.getWidth() * cp.getHeight()];
+                byte[] G = new byte[cp.getWidth() * cp.getHeight()];
+                byte[] B = new byte[cp.getWidth() * cp.getHeight()];
+
+                cp.getRGB(R, G, B);
+
+                channels[0] = new ByteProcessor(cp.getWidth(), cp.getHeight(), R, null);
+                channels[1] = new ByteProcessor(cp.getWidth(), cp.getHeight(), G, null);
+                channels[2] = new ByteProcessor(cp.getWidth(), cp.getHeight(), B, null);
+
+                IJ.log("ECMAD: RGB channels extracted");
+            } else {
+                // For grayscale, just use the original
+                channels[0] = ip.duplicate();
+            }
+
             int width = ip.getWidth();
             int height = ip.getHeight();
 
@@ -55,12 +75,42 @@ public class ECMADMain implements PlugInFilter {
                 }
             });
 
-            IJ.log("ECMAD: Beginning deconvolution process...");
-            float[][] result = processor.process(inputImage, initialPSF);
+            ImageProcessor[] resultChannels = new ImageProcessor[channels.length];
 
-            IJ.log("ECMAD: Normalizing and displaying result...");
-            ImageUtils.normalize(result);
-            ImageProcessor output = ImageUtils.toImageProcessor(result);
+            // Process each channel
+            for (int c = 0; c < channels.length; c++) {
+                IJ.log("ECMAD: Processing channel " + (c+1) + " of " + channels.length);
+
+                // Convert channel to float array
+                float[][] inputChannel = ImageUtils.toFloatArray(channels[c]);
+
+                // Process the channel
+                IJ.log("ECMAD: Beginning deconvolution process for channel " + (c+1) + "...");
+                float[][] resultChannel = processor.process(inputChannel, initialPSF);
+
+                // Normalize and convert back to ImageProcessor
+                ImageUtils.normalize(resultChannel);
+                resultChannels[c] = ImageUtils.toImageProcessor(resultChannel);
+            }
+
+            ImageProcessor output;
+
+            if (isColor) {
+                // For color images, merge the RGB channels
+                IJ.log("ECMAD: Merging RGB channels...");
+                byte[] R = (byte[])resultChannels[0].convertToByte(false).getPixels();
+                byte[] G = (byte[])resultChannels[1].convertToByte(false).getPixels();
+                byte[] B = (byte[])resultChannels[2].convertToByte(false).getPixels();
+
+                ColorProcessor colorOutput = new ColorProcessor(width, height);
+                colorOutput.setRGB(R, G, B);
+                output = colorOutput;
+            } else {
+                // For grayscale, just use the processed channel
+                output = resultChannels[0];
+            }
+
+            // Display the result
             new ImagePlus("ECMAD Result", output).show();
 
             IJ.log("ECMAD: Process completed successfully.");
@@ -77,6 +127,12 @@ public class ECMADMain implements PlugInFilter {
             }
 
             IJ.showMessage("Error", "An error occurred:\n" + e.getMessage());
+        } finally {
+            // Ensure the original image is unlocked if it was locked
+            if (imp != null && imp.isLocked()) {
+                IJ.log("ECMAD: Unlocking the original image");
+                imp.unlock();
+            }
         }
     }
 }
