@@ -1,13 +1,17 @@
+import org.gradle.api.file.DuplicatesStrategy
+
 plugins {
-    id("java")
+    java
 }
 
 group = "org.example"
-version = "1.0-SNAPSHOT"
+version = "1.2"
 
 repositories {
     mavenCentral()
-    maven { url = uri("https://maven.scijava.org/content/groups/public") }
+    maven {
+        url = uri("https://maven.scijava.org/content/repositories/public/")
+    }
 }
 
 java {
@@ -17,15 +21,29 @@ java {
 }
 
 dependencies {
-//    implementation("org.openimaj:JTransforms:1.3.10")
     implementation("net.imagej:imagej:2.16.0")
     implementation("net.imagej:imagej-legacy:2.0.1")
-    implementation("net.imagej:ij:1.54p")
+    implementation("net.imagej:ij:1.53k")
+    implementation("com.github.wendykierp:JTransforms:3.1")
 }
 
-tasks.withType<Jar> {
-    archiveBaseName.set("DeconvolutionPlugin")
+tasks.processResources {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from("src/main/resources") {
+        include("plugins.config")
+        into("/")
+    }
+}
+
+tasks.jar {
     manifest {
-        attributes["Main-Class"] = "org.example.ECMADMain"
+        attributes["Main-Class"] = "org.example.BlindDeconvolution"
+    }
+    archiveBaseName.set("DeconvolutionPlugin")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from(sourceSets.main.get().output)
+    from("src/main/resources") {
+        include("plugins.config")
     }
 }
