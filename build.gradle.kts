@@ -4,19 +4,13 @@ plugins {
     java
 }
 
-group = "org.example"
-version = "1.2"
+group = "org.lmh.deconvolution"
+version = "1.0"
 
 repositories {
     mavenCentral()
     maven {
         url = uri("https://maven.scijava.org/content/repositories/public/")
-    }
-}
-
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(8))
     }
 }
 
@@ -37,7 +31,7 @@ tasks.processResources {
 
 tasks.jar {
     manifest {
-        attributes["Main-Class"] = "org.example.BlindDeconvolution"
+        attributes["Main-Class"] = "org.lmh.deconvolution.DeconvolutionBlindPlugin"
     }
     archiveBaseName.set("DeconvolutionPlugin")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE

@@ -1,4 +1,4 @@
-package org.example.algorithms;
+package org.lmh.deconvolution.algorithms;
 
 import ij.ImagePlus;
 import ij.gui.GenericDialog;

@@ -1,12 +1,13 @@
-package org.example.algorithms;
+package org.lmh.deconvolution.algorithms;
 
 import ij.ImagePlus;
 import ij.gui.GenericDialog;
 import ij.plugin.filter.PlugInFilter;
 import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
+import org.jtransforms.fft.FloatFFT_2D;
 
-public class BlindDeconvolution3 implements PlugInFilter {
+public class BlindDeconvolution2 implements PlugInFilter {
     private int psfSize = 5;
     private int numIter = 10;
 
@@ -29,15 +30,15 @@ public class BlindDeconvolution3 implements PlugInFilter {
             gray[i] = ((R[i] & 0xff) + (G[i] & 0xff) + (B[i] & 0xff)) / 3f / 255f;
         }
 
-        float[] psf1D = new float[psfSize];
-        for (int i = 0; i < psfSize; i++) psf1D[i] = 1f / psfSize;
+        float[] psf = new float[psfSize * psfSize];
+        for (int i = 0; i < psf.length; i++) psf[i] = 1f / psf.length;
 
         float[] latent = gray.clone();
         for (int it = 0; it < numIter; it++) {
-            float[] conv = convolveSeparable(latent, psf1D, width, height);
+            float[] conv = convolveFFT(latent, psf, width, height, psfSize);
             float[] ratio = new float[gray.length];
             for (int i = 0; i < gray.length; i++) ratio[i] = gray[i] / (conv[i] + 1e-6f);
-            float[] update = convolveSeparable(ratio, psf1D, width, height);
+            float[] update = convolveFFT(ratio, psf, width, height, psfSize);
             for (int i = 0; i < latent.length; i++) {
                 latent[i] *= update[i];
                 latent[i] = Math.min(1f, Math.max(0f, latent[i]));
@@ -49,11 +50,11 @@ public class BlindDeconvolution3 implements PlugInFilter {
 
         ColorProcessor cp = new ColorProcessor(width, height);
         cp.setPixels(result);
-        new ImagePlus("Deconvolved Separable", cp).show();
+        new ImagePlus("Deconvolved FFT", cp).show();
     }
 
     private boolean showDialog() {
-        GenericDialog gd = new GenericDialog("Blind Deconvolution - Separable");
+        GenericDialog gd = new GenericDialog("Blind Deconvolution - FFT");
         gd.addNumericField("PSF Size", psfSize, 0);
         gd.addNumericField("Iterations", numIter, 0);
         gd.showDialog();
@@ -63,32 +64,49 @@ public class BlindDeconvolution3 implements PlugInFilter {
         return true;
     }
 
-    private float[] convolveSeparable(float[] image, float[] kernel1D, int width, int height) {
-        int k = kernel1D.length / 2;
-        float[] temp = new float[image.length];
-        float[] result = new float[image.length];
-
-        // Horizontal convolution
+    private float[] convolveFFT(float[] image, float[] kernel, int width, int height, int kernelSize) {
+        float[][] image2D = new float[height][2 * width];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                float sum = 0;
-                for (int i = -k; i <= k; i++) {
-                    int xi = Math.min(width - 1, Math.max(0, x + i));
-                    sum += image[y * width + xi] * kernel1D[i + k];
-                }
-                temp[y * width + x] = sum;
+                image2D[y][2 * x] = image[y * width + x];
+                image2D[y][2 * x + 1] = 0;
             }
         }
 
-        // Vertical convolution
+        float[][] kernel2D = new float[height][2 * width];
+        int k = kernelSize / 2;
+        for (int j = 0; j < kernelSize; j++) {
+            for (int i = 0; i < kernelSize; i++) {
+                int x = (i - k + width) % width;
+                int y = (j - k + height) % height;
+                kernel2D[y][2 * x] = kernel[j * kernelSize + i];
+                kernel2D[y][2 * x + 1] = 0;
+            }
+        }
+
+        FloatFFT_2D fft = new FloatFFT_2D(height, width);
+        fft.complexForward(image2D);
+        fft.complexForward(kernel2D);
+
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                float sum = 0;
-                for (int j = -k; j <= k; j++) {
-                    int yj = Math.min(height - 1, Math.max(0, y + j));
-                    sum += temp[yj * width + x] * kernel1D[j + k];
-                }
-                result[y * width + x] = sum;
+                int re = 2 * x;
+                int im = 2 * x + 1;
+                float a = image2D[y][re];
+                float b = image2D[y][im];
+                float c = kernel2D[y][re];
+                float d = kernel2D[y][im];
+                image2D[y][re] = a * c - b * d;
+                image2D[y][im] = a * d + b * c;
+            }
+        }
+
+        fft.complexInverse(image2D, true);
+
+        float[] result = new float[width * height];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                result[y * width + x] = image2D[y][2 * x];
             }
         }
 
