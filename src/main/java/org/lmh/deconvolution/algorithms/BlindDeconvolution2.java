@@ -7,17 +7,16 @@ import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
 import org.jtransforms.fft.FloatFFT_2D;
 
-public class BlindDeconvolution2 implements PlugInFilter {
-    private int psfSize = 5;
-    private int numIter = 10;
+public class BlindDeconvolution2 extends DeconvolutionAlgorithm {
 
-    public int setup(String arg, ImagePlus imp) {
-        return DOES_RGB;
+    public BlindDeconvolution2(ImageProcessor ip, int psfSize, int iterations) {
+        this.ip = ip;
+        this.psfSize = psfSize;
+        this.iterations = iterations;
     }
 
-    public void run(ImageProcessor ip) {
-        if (!showDialog()) return;
-
+    @Override
+    public void run() {
         int width = ip.getWidth();
         int height = ip.getHeight();
         byte[] R = new byte[width * height];
@@ -34,7 +33,7 @@ public class BlindDeconvolution2 implements PlugInFilter {
         for (int i = 0; i < psf.length; i++) psf[i] = 1f / psf.length;
 
         float[] latent = gray.clone();
-        for (int it = 0; it < numIter; it++) {
+        for (int it = 0; it < iterations; it++) {
             float[] conv = convolveFFT(latent, psf, width, height, psfSize);
             float[] ratio = new float[gray.length];
             for (int i = 0; i < gray.length; i++) ratio[i] = gray[i] / (conv[i] + 1e-6f);
@@ -51,17 +50,6 @@ public class BlindDeconvolution2 implements PlugInFilter {
         ColorProcessor cp = new ColorProcessor(width, height);
         cp.setPixels(result);
         new ImagePlus("Deconvolved FFT", cp).show();
-    }
-
-    private boolean showDialog() {
-        GenericDialog gd = new GenericDialog("Blind Deconvolution - FFT");
-        gd.addNumericField("PSF Size", psfSize, 0);
-        gd.addNumericField("Iterations", numIter, 0);
-        gd.showDialog();
-        if (gd.wasCanceled()) return false;
-        psfSize = (int) gd.getNextNumber();
-        numIter = (int) gd.getNextNumber();
-        return true;
     }
 
     private float[] convolveFFT(float[] image, float[] kernel, int width, int height, int kernelSize) {

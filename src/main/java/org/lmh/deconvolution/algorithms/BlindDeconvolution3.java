@@ -6,17 +6,16 @@ import ij.plugin.filter.PlugInFilter;
 import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
 
-public class BlindDeconvolution3 implements PlugInFilter {
-    private int psfSize = 5;
-    private int numIter = 10;
+public class BlindDeconvolution3 extends DeconvolutionAlgorithm {
 
-    public int setup(String arg, ImagePlus imp) {
-        return DOES_RGB;
+    public BlindDeconvolution3(ImageProcessor ip, int psfSize, int iterations) {
+        this.ip = ip;
+        this.psfSize = psfSize;
+        this.iterations = iterations;
     }
 
-    public void run(ImageProcessor ip) {
-        if (!showDialog()) return;
-
+    @Override
+    public void run() {
         int width = ip.getWidth();
         int height = ip.getHeight();
         byte[] R = new byte[width * height];
@@ -33,7 +32,7 @@ public class BlindDeconvolution3 implements PlugInFilter {
         for (int i = 0; i < psfSize; i++) psf1D[i] = 1f / psfSize;
 
         float[] latent = gray.clone();
-        for (int it = 0; it < numIter; it++) {
+        for (int it = 0; it < iterations; it++) {
             float[] conv = convolveSeparable(latent, psf1D, width, height);
             float[] ratio = new float[gray.length];
             for (int i = 0; i < gray.length; i++) ratio[i] = gray[i] / (conv[i] + 1e-6f);
@@ -50,17 +49,6 @@ public class BlindDeconvolution3 implements PlugInFilter {
         ColorProcessor cp = new ColorProcessor(width, height);
         cp.setPixels(result);
         new ImagePlus("Deconvolved Separable", cp).show();
-    }
-
-    private boolean showDialog() {
-        GenericDialog gd = new GenericDialog("Blind Deconvolution - Separable");
-        gd.addNumericField("PSF Size", psfSize, 0);
-        gd.addNumericField("Iterations", numIter, 0);
-        gd.showDialog();
-        if (gd.wasCanceled()) return false;
-        psfSize = (int) gd.getNextNumber();
-        numIter = (int) gd.getNextNumber();
-        return true;
     }
 
     private float[] convolveSeparable(float[] image, float[] kernel1D, int width, int height) {

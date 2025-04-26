@@ -6,17 +6,16 @@ import ij.plugin.filter.PlugInFilter;
 import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
 
-public class BlindDeconvolution1 implements PlugInFilter {
-    private int psfSize = 5;
-    private int numIter = 10;
+public class BlindDeconvolution1 extends DeconvolutionAlgorithm {
 
-    public int setup(String arg, ImagePlus imp) {
-        return DOES_RGB;
+    public BlindDeconvolution1(ImageProcessor ip, int psfSize, int iterations) {
+        this.ip = ip;
+        this.psfSize = psfSize;
+        this.iterations = iterations;
     }
 
-    public void run(ImageProcessor ip) {
-        if (!showDialog()) return;
-
+    @Override
+    public void run() {
         int width = ip.getWidth();
         int height = ip.getHeight();
 
@@ -38,7 +37,7 @@ public class BlindDeconvolution1 implements PlugInFilter {
 
         // Deconvolve grayscale image
         float[] latent = gray.clone();
-        for (int it = 0; it < numIter; it++) {
+        for (int it = 0; it < iterations; it++) {
             float[] conv = convolve(latent, psf, width, height, psfSize);
             float[] ratio = new float[gray.length];
             for (int i = 0; i < gray.length; i++) {
@@ -59,17 +58,6 @@ public class BlindDeconvolution1 implements PlugInFilter {
         ColorProcessor cp = new ColorProcessor(width, height);
         cp.setRGB(resultR, resultG, resultB);
         new ImagePlus("Deconvolved Image", cp).show();
-    }
-
-    private boolean showDialog() {
-        GenericDialog gd = new GenericDialog("Blind Deconvolution");
-        gd.addNumericField("PSF Size", psfSize, 0);
-        gd.addNumericField("Iterations", numIter, 0);
-        gd.showDialog();
-        if (gd.wasCanceled()) return false;
-        psfSize = (int) gd.getNextNumber();
-        numIter = (int) gd.getNextNumber();
-        return true;
     }
 
     private byte[] deconvolveChannel(byte[] channel, float[] psf, int width, int height, int psfSize) {
