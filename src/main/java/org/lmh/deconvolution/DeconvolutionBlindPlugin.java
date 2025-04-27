@@ -9,14 +9,28 @@ import org.lmh.deconvolution.algorithms.BlindDeconvolution2;
 import org.lmh.deconvolution.algorithms.BlindDeconvolution3;
 import org.lmh.deconvolution.algorithms.DeconvolutionAlgorithm;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
+
 public class DeconvolutionBlindPlugin implements PlugInFilter {
 
-    static final String algorithm1 = "Blind Deconvolution 1";
-    static final String algorithm2 = "Blind Deconvolution 2";
-    static final String algorithm3 = "Blind Deconvolution 3";
+    ImagePlus imp;
+    static final String algorithm1 = "Blind Deconvolution - Direct";
+    static final String algorithm2 = "Blind Deconvolution - FFT";
+    static final String algorithm3 = "Blind Deconvolution - Separable";
+
+    class ProcessingCallbackImpl implements ProcessingCallback {
+        @Override
+        public void onFinish() {
+            if (imp != null && imp.isLocked()) {
+                imp.unlock();
+            }
+        }
+    }
 
     @Override
     public int setup(String arg, ImagePlus imp) {
+        this.imp = imp;
         return DOES_RGB;
     }
 
@@ -42,6 +56,17 @@ public class DeconvolutionBlindPlugin implements PlugInFilter {
             case algorithm3 -> new BlindDeconvolution3(ip, psfSize, numIter);
             default -> new BlindDeconvolution1(ip, psfSize, numIter);
         };
-        algorithm.run();
+        try {
+            algorithm.run(new ProcessingCallbackImpl());
+        } catch (Throwable t) {
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            t.printStackTrace(pw);
+            String sStackTrace = sw.toString();
+            IJ.log(sStackTrace);
+            if (imp != null && imp.isLocked()) {
+                imp.unlock();
+            }
+        }
     }
 }

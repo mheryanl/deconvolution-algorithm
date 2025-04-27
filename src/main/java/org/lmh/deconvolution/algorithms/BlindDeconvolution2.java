@@ -1,11 +1,12 @@
 package org.lmh.deconvolution.algorithms;
 
 import ij.ImagePlus;
-import ij.gui.GenericDialog;
-import ij.plugin.filter.PlugInFilter;
 import ij.process.ColorProcessor;
+import ij.process.FloatProcessor;
 import ij.process.ImageProcessor;
-import org.jtransforms.fft.FloatFFT_2D;
+import org.lmh.deconvolution.ProcessingCallback;
+import org.lmh.deconvolution.utils.ComplexArray2D;
+import org.lmh.deconvolution.utils.FFTUtils;
 
 public class BlindDeconvolution2 extends DeconvolutionAlgorithm {
 
@@ -16,85 +17,132 @@ public class BlindDeconvolution2 extends DeconvolutionAlgorithm {
     }
 
     @Override
-    public void run() {
+    public void run(ProcessingCallback callback) {
         int width = ip.getWidth();
         int height = ip.getHeight();
-        byte[] R = new byte[width * height];
-        byte[] G = new byte[width * height];
-        byte[] B = new byte[width * height];
-        ((ColorProcessor) ip).getRGB(R, G, B);
 
-        float[] gray = new float[width * height];
-        for (int i = 0; i < gray.length; i++) {
-            gray[i] = ((R[i] & 0xff) + (G[i] & 0xff) + (B[i] & 0xff)) / 3f / 255f;
+        byte[] origR = new byte[width * height];
+        byte[] origG = new byte[width * height];
+        byte[] origB = new byte[width * height];
+        ((ColorProcessor) ip).getRGB(origR, origG, origB);
+
+        float[] rChannel = new float[width * height];
+        float[] gChannel = new float[width * height];
+        float[] bChannel = new float[width * height];
+        for (int i = 0; i < rChannel.length; i++) {
+            rChannel[i] = (origR[i] & 0xff) / 255f;
+            gChannel[i] = (origG[i] & 0xff) / 255f;
+            bChannel[i] = (origB[i] & 0xff) / 255f;
         }
 
-        float[] psf = new float[psfSize * psfSize];
-        for (int i = 0; i < psf.length; i++) psf[i] = 1f / psf.length;
+        // Precompute PSF FFT once
+        FloatProcessor psf = createPSF(psfSize);
+        ComplexArray2D psfFFT = precomputePSF(psf, width, height);
 
-        float[] latent = gray.clone();
-        for (int it = 0; it < iterations; it++) {
-            float[] conv = convolveFFT(latent, psf, width, height, psfSize);
-            float[] ratio = new float[gray.length];
-            for (int i = 0; i < gray.length; i++) ratio[i] = gray[i] / (conv[i] + 1e-6f);
-            float[] update = convolveFFT(ratio, psf, width, height, psfSize);
+        // Process each channel
+        float[] latentR = rChannel.clone();
+        processChannel(latentR, rChannel, psfFFT, width, height);
+
+        float[] latentG = gChannel.clone();
+        processChannel(latentG, gChannel, psfFFT, width, height);
+
+        float[] latentB = bChannel.clone();
+        processChannel(latentB, bChannel, psfFFT, width, height);
+
+        // Combine back to RGB
+        int[] resultPixels = new int[width * height];
+        for (int i = 0; i < resultPixels.length; i++) {
+            int r = (int) (latentR[i] * 255);
+            int g = (int) (latentG[i] * 255);
+            int b = (int) (latentB[i] * 255);
+
+            r = Math.min(255, Math.max(0, r));
+            g = Math.min(255, Math.max(0, g));
+            b = Math.min(255, Math.max(0, b));
+
+            resultPixels[i] = (255 << 24) | (r << 16) | (g << 8) | b;
+        }
+
+        ColorProcessor cp = new ColorProcessor(width, height);
+        cp.setPixels(resultPixels);
+        new ImagePlus("Deconvolved Image - FFT", cp).show();
+        callback.onFinish();
+    }
+
+    private FloatProcessor createPSF(int psfSize) {
+        FloatProcessor psf = new FloatProcessor(psfSize, psfSize);
+        float value = 1f / (psfSize * psfSize);
+        for (int y = 0; y < psfSize; y++) {
+            for (int x = 0; x < psfSize; x++) {
+                psf.setf(x, y, value);
+            }
+        }
+        return psf;
+    }
+
+    private ComplexArray2D precomputePSF(FloatProcessor psfSmall, int width, int height) {
+        int paddedSize = 1;
+        while (paddedSize < Math.max(width, height)) paddedSize *= 2;
+
+        ComplexArray2D psfComplex = new ComplexArray2D(paddedSize, paddedSize);
+        int psfWidth = psfSmall.getWidth();
+        int psfHeight = psfSmall.getHeight();
+        for (int y = 0; y < psfHeight; y++) {
+            for (int x = 0; x < psfWidth; x++) {
+                psfComplex.real[y][x] = psfSmall.getf(x, y);
+            }
+        }
+        FFTUtils.fft2D(psfComplex, false);
+        return psfComplex;
+    }
+
+    private void processChannel(float[] latent, float[] observed, ComplexArray2D psfFFT, int width, int height) {
+        for (int iter = 0; iter < iterations; iter++) {
+            float[] conv = convolve(latent, psfFFT, width, height);
             for (int i = 0; i < latent.length; i++) {
-                latent[i] *= update[i];
+                latent[i] *= observed[i] / (conv[i] + 1e-6f);
                 latent[i] = Math.min(1f, Math.max(0f, latent[i]));
             }
         }
-
-        byte[] result = new byte[latent.length];
-        for (int i = 0; i < result.length; i++) result[i] = (byte) (latent[i] * 255);
-
-        ColorProcessor cp = new ColorProcessor(width, height);
-        cp.setPixels(result);
-        new ImagePlus("Deconvolved FFT", cp).show();
     }
 
-    private float[] convolveFFT(float[] image, float[] kernel, int width, int height, int kernelSize) {
-        float[][] image2D = new float[height][2 * width];
+    private float[] convolve(float[] image, ComplexArray2D psfFFT, int width, int height) {
+        int paddedSize = 1;
+        while (paddedSize < Math.max(width, height)) paddedSize *= 2;
+
+        ComplexArray2D imageComplex = new ComplexArray2D(paddedSize, paddedSize);
+
+        // Fill image
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                image2D[y][2 * x] = image[y * width + x];
-                image2D[y][2 * x + 1] = 0;
+                imageComplex.real[y][x] = image[y * width + x];
             }
         }
 
-        float[][] kernel2D = new float[height][2 * width];
-        int k = kernelSize / 2;
-        for (int j = 0; j < kernelSize; j++) {
-            for (int i = 0; i < kernelSize; i++) {
-                int x = (i - k + width) % width;
-                int y = (j - k + height) % height;
-                kernel2D[y][2 * x] = kernel[j * kernelSize + i];
-                kernel2D[y][2 * x + 1] = 0;
+        // Forward FFT
+        FFTUtils.fft2D(imageComplex, false);
+
+        // Multiply with precomputed PSF FFT
+        for (int y = 0; y < paddedSize; y++) {
+            for (int x = 0; x < paddedSize; x++) {
+                double a = imageComplex.real[y][x];
+                double b = imageComplex.imag[y][x];
+                double c = psfFFT.real[y][x];
+                double d = psfFFT.imag[y][x];
+
+                imageComplex.real[y][x] = a * c - b * d;
+                imageComplex.imag[y][x] = a * d + b * c;
             }
         }
 
-        FloatFFT_2D fft = new FloatFFT_2D(height, width);
-        fft.complexForward(image2D);
-        fft.complexForward(kernel2D);
+        // Inverse FFT
+        FFTUtils.fft2D(imageComplex, true);
 
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int re = 2 * x;
-                int im = 2 * x + 1;
-                float a = image2D[y][re];
-                float b = image2D[y][im];
-                float c = kernel2D[y][re];
-                float d = kernel2D[y][im];
-                image2D[y][re] = a * c - b * d;
-                image2D[y][im] = a * d + b * c;
-            }
-        }
-
-        fft.complexInverse(image2D, true);
-
+        // Extract real part cropped back to original size
         float[] result = new float[width * height];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                result[y * width + x] = image2D[y][2 * x];
+                result[y * width + x] = (float) imageComplex.real[y][x];
             }
         }
 

@@ -5,6 +5,7 @@ import ij.gui.GenericDialog;
 import ij.plugin.filter.PlugInFilter;
 import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
+import org.lmh.deconvolution.ProcessingCallback;
 
 public class BlindDeconvolution1 extends DeconvolutionAlgorithm {
 
@@ -15,7 +16,7 @@ public class BlindDeconvolution1 extends DeconvolutionAlgorithm {
     }
 
     @Override
-    public void run() {
+    public void run(ProcessingCallback callback) {
         int width = ip.getWidth();
         int height = ip.getHeight();
 
@@ -57,7 +58,8 @@ public class BlindDeconvolution1 extends DeconvolutionAlgorithm {
 
         ColorProcessor cp = new ColorProcessor(width, height);
         cp.setRGB(resultR, resultG, resultB);
-        new ImagePlus("Deconvolved Image", cp).show();
+        new ImagePlus("Deconvolved Image - Direct", cp).show();
+        callback.onFinish();
     }
 
     private byte[] deconvolveChannel(byte[] channel, float[] psf, int width, int height, int psfSize) {

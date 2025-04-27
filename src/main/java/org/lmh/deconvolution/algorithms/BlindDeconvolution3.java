@@ -5,6 +5,7 @@ import ij.gui.GenericDialog;
 import ij.plugin.filter.PlugInFilter;
 import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
+import org.lmh.deconvolution.ProcessingCallback;
 
 public class BlindDeconvolution3 extends DeconvolutionAlgorithm {
 
@@ -15,40 +16,71 @@ public class BlindDeconvolution3 extends DeconvolutionAlgorithm {
     }
 
     @Override
-    public void run() {
+    public void run(ProcessingCallback callback) {
         int width = ip.getWidth();
         int height = ip.getHeight();
-        byte[] R = new byte[width * height];
-        byte[] G = new byte[width * height];
-        byte[] B = new byte[width * height];
-        ((ColorProcessor) ip).getRGB(R, G, B);
+        byte[] origR = new byte[width * height];
+        byte[] origG = new byte[width * height];
+        byte[] origB = new byte[width * height];
+        ((ColorProcessor) ip).getRGB(origR, origG, origB);
 
-        float[] gray = new float[width * height];
-        for (int i = 0; i < gray.length; i++) {
-            gray[i] = ((R[i] & 0xff) + (G[i] & 0xff) + (B[i] & 0xff)) / 3f / 255f;
+        // Process each channel separately
+        float[] rChannel = new float[width * height];
+        float[] gChannel = new float[width * height];
+        float[] bChannel = new float[width * height];
+
+        // Convert byte arrays to float arrays (normalized to 0-1)
+        for (int i = 0; i < rChannel.length; i++) {
+            rChannel[i] = (origR[i] & 0xff) / 255f;
+            gChannel[i] = (origG[i] & 0xff) / 255f;
+            bChannel[i] = (origB[i] & 0xff) / 255f;
         }
 
         float[] psf1D = new float[psfSize];
         for (int i = 0; i < psfSize; i++) psf1D[i] = 1f / psfSize;
 
-        float[] latent = gray.clone();
+        // Process red channel
+        float[] latentR = rChannel.clone();
+        processChannel(latentR, rChannel, psf1D, width, height);
+
+        // Process green channel
+        float[] latentG = gChannel.clone();
+        processChannel(latentG, gChannel, psf1D, width, height);
+
+        // Process blue channel
+        float[] latentB = bChannel.clone();
+        processChannel(latentB, bChannel, psf1D, width, height);
+
+        // Convert the result back to an RGB int array for ColorProcessor
+        int[] resultPixels = new int[width * height];
+        for (int i = 0; i < resultPixels.length; i++) {
+            int r = (int)(latentR[i] * 255);
+            int g = (int)(latentG[i] * 255);
+            int b = (int)(latentB[i] * 255);
+
+            // Create RGB value with original alpha
+            resultPixels[i] = (255 << 24) | (r << 16) | (g << 8) | b;
+        }
+
+        ColorProcessor cp = new ColorProcessor(width, height);
+        cp.setPixels(resultPixels);
+        new ImagePlus("Deconvolved Image - Separable", cp).show();
+        callback.onFinish();
+    }
+
+    private void processChannel(float[] latent, float[] original, float[] psf1D, int width, int height) {
         for (int it = 0; it < iterations; it++) {
             float[] conv = convolveSeparable(latent, psf1D, width, height);
-            float[] ratio = new float[gray.length];
-            for (int i = 0; i < gray.length; i++) ratio[i] = gray[i] / (conv[i] + 1e-6f);
+            float[] ratio = new float[original.length];
+            for (int i = 0; i < original.length; i++) {
+                ratio[i] = original[i] / (conv[i] + 1e-6f);
+            }
             float[] update = convolveSeparable(ratio, psf1D, width, height);
             for (int i = 0; i < latent.length; i++) {
                 latent[i] *= update[i];
                 latent[i] = Math.min(1f, Math.max(0f, latent[i]));
             }
         }
-
-        byte[] result = new byte[latent.length];
-        for (int i = 0; i < result.length; i++) result[i] = (byte) (latent[i] * 255);
-
-        ColorProcessor cp = new ColorProcessor(width, height);
-        cp.setPixels(result);
-        new ImagePlus("Deconvolved Separable", cp).show();
     }
 
     private float[] convolveSeparable(float[] image, float[] kernel1D, int width, int height) {
